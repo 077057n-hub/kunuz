@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>كنوز الطبيعة</title>
+<link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#EEF1E8;--ink:#1F2418;--olive:#36432A;--gold:#D9A21B;--card:#fff;--mut:#6B735E;--red:#B3382C}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Readex Pro',Tahoma,sans-serif;background:var(--bg);color:var(--ink);line-height:1.6}
+header{background:var(--olive);color:#fff;padding:14px 16px;position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;align-items:center}
+header a{color:#fff;text-decoration:none}
+.logo{font-size:20px;font-weight:600}.logo b{color:var(--gold)}
+nav a{margin-inline-start:14px;font-size:14px}
+main{max-width:720px;margin:0 auto;padding:16px}
+h2{margin:6px 0 14px;font-size:20px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.card{background:var(--card);border-radius:10px;padding:12px;border:1px solid #D9DECD}
+a.card{display:block;color:inherit;text-decoration:none}
+.card img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;background:#E3E8D8}
+.sec{padding:22px 12px;text-align:center;font-weight:600;font-size:17px;border-inline-start:5px solid var(--gold)}
+button,.btn{font:inherit;background:var(--olive);color:#fff;border:0;border-radius:8px;padding:10px 14px;cursor:pointer;margin:3px 0}
+button.gold{background:var(--gold);color:var(--ink);font-weight:600}
+button.red{background:var(--red)}button.ghost{background:#E3E8D8;color:var(--ink)}
+input,select,textarea{font:inherit;width:100%;padding:10px;margin:4px 0 10px;border:1px solid #BCC4AD;border-radius:8px;background:#fff}
+label{font-size:14px;color:var(--mut)}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1}
+.mut{color:var(--mut);font-size:14px}.tot{font-weight:600;font-size:18px}
+.badge{display:inline-block;background:var(--gold);color:var(--ink);border-radius:20px;padding:0 10px;font-size:13px}
+.line{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid #E3E8D8}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:8px;z-index:9}
+</style>
+</head>
+<body>
+<header><a href="#/" class="logo">كنوز <b>الطبيعة</b></a>
+<nav><a href="#/cart">🛒 <span id="cc">0</span></a><a href="#/track">طلباتي</a></nav></header>
+<main id="app">جاري التحميل...</main>
+
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {getFirestore,collection,doc,getDoc,getDocs,addDoc,setDoc,updateDoc,deleteDoc,onSnapshot,query,orderBy,where,serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {getAuth,signInWithEmailAndPassword,onAuthStateChanged,signOut} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+const app=initializeApp({
+  apiKey:"AIzaSyAvbTRMpXHquEe1yDMj5vD8mBO3GZ1iwiM",
+  authDomain:"kunuz-store-cd6c8.firebaseapp.com",
+  projectId:"kunuz-store-cd6c8",
+  storageBucket:"kunuz-store-cd6c8.firebasestorage.app",
+  messagingSenderId:"644995392724",
+  appId:"1:644995392724:web:3ffd83b1da2674bd530741"
+});
+const db=getFirestore(app),auth=getAuth(app);
+
+// ---------- أدوات ----------
+const $=s=>document.querySelector(s),A=$('#app');
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fm=n=>Number(n||0).toLocaleString('en-US');
+const ls={get:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}}};
+const toast=m=>{const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.append(t);setTimeout(()=>t.remove(),2200)};
+const weightLabel=kg=>{const g=Math.round(kg*1000),k=Math.floor(g/1000),r=g%1000;return k==0?`${r} غرام`:r==0?`${k} كغم`:`${k} كغم و${r} غرام`};
+const shrink=f=>new Promise(r=>{const i=new Image();i.onload=()=>{const s=Math.min(1,600/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=i.width*s;c.height=i.height*s;c.getContext('2d').drawImage(i,0,0,c.width,c.height);r(c.toDataURL('image/jpeg',.7))};i.src=URL.createObjectURL(f)});
+const beep=()=>{try{const x=new AudioContext(),o=x.createOscillator();o.connect(x.destination);o.frequency.value=880;o.start();o.stop(x.currentTime+.4)}catch{}};
+
+let sections=[],products=[],settings={welcome:'أهلاً بيك 🌿 اختار القسم اللي تريده:',delivery:5000},cart=ls.get('cart',[]),unsub=null;
+const saveCart=()=>{ls.set('cart',cart);$('#cc').textContent=cart.length};
+
+async function loadCatalog(force){
+  if(!force&&sections.length)return;
+  const [s,p,st]=await Promise.all([getDocs(collection(db,'sections')),getDocs(collection(db,'products')),getDoc(doc(db,'settings','main'))]);
+  sections=s.docs.map(d=>({id:d.id,...d.data()}));
+  products=p.docs.map(d=>({id:d.id,...d.data()}));
+  if(st.exists())settings={...settings,...st.data()};
+}
+
+// ---------- السلة ----------
+function addToCart(pid,name,detail,q,u,t){
+  const x=cart.find(i=>i.pid==pid&&i.d==detail&&i.w!==1);
+  if(x){x.q+=q;x.t+=t}else cart.push({pid,n:name,d:detail,q,u,t});
+  saveCart();toast('✅ تمت الإضافة للسلة');
+}
+
+// ---------- الصفحات ----------
+async function home(){
+  await loadCatalog();
+  A.innerHTML=`<h2>${esc(settings.welcome)}</h2><div class="grid">${sections.map(s=>`<a class="card sec" href="#/s/${s.id}">📦 ${esc(s.name)}</a>`).join('')||'<p class="mut">ما بعد أضفنا أقسام.</p>'}</div>`;
+}
+async function section(id){
+  await loadCatalog();
+  const s=sections.find(x=>x.id==id);if(!s)return home();
+  const ps=products.filter(p=>p.sid==id);
+  A.innerHTML=`<h2>${esc(s.name)}</h2><div class="grid">${ps.map(p=>`<a class="card" href="#/p/${p.id}">${p.img?`<img src="${p.img}" alt="">`:''}<div>${esc(p.name)}</div></a>`).join('')||'<p class="mut">ما توجد مواد بهذا القسم حالياً.</p>'}</div><p><a href="#/">← القائمة الرئيسية</a></p>`;
+}
+async function product(id){
+  await loadCatalog();
+  const p=products.find(x=>x.id==id);if(!p)return home();
+  let body='';
+  if(p.type=='sizes')body=p.sizes.map((s,i)=>`<button data-s="${i}">${esc(s.l)} - ${fm(s.r)} د.ع</button>`).join(' ');
+  else if(p.type=='weight')body=`<p>سعر الكيلو: ${fm(p.retail)} د.ع<br>الحد الأدنى للطلب: ${fm(p.min)} د.ع</p><label>اكتب المبلغ اللي تريد تدفعه (دينار) وراح نحسبلك الوزن</label><input id="amt" type="number" inputmode="numeric"><div class="mut" id="wl"></div><button class="gold" id="addw">أضف للسلة</button>`;
+  else body=`<p class="tot">${fm(p.retail)} د.ع</p>`+[1,2,3,4,5].map(n=>`<button data-q="${n}">${n}</button>`).join(' ');
+  A.innerHTML=`<div class="card">${p.img?`<img src="${p.img}" alt="">`:''}<h2>${esc(p.name)}</h2><p>${esc(p.desc)}</p>${body}</div><p><a href="#/s/${p.sid}">← رجوع</a> · <a href="#/cart">🛒 السلة</a></p>`;
+  A.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{const s=p.sizes[b.dataset.s];addToCart(p.id,p.name,s.l,1,s.r,s.r)});
+  A.querySelectorAll('[data-q]').forEach(b=>b.onclick=()=>{const q=+b.dataset.q;addToCart(p.id,p.name,'1 قطعة',q,p.retail,p.retail*q)});
+  if(p.type=='weight'){
+    $('#amt').oninput=e=>{const a=+e.target.value;$('#wl').textContent=a>0?`≈ ${weightLabel(a/p.retail)}`:''};
+    $('#addw').onclick=()=>{const a=+$('#amt').value;if(!(a>0))return toast('اكتب المبلغ');if(a<p.min)return toast(`أقل مبلغ ${fm(p.min)} د.ع`);const w=Math.round(a/p.retail*1000)/1000;addToCart(p.id,p.name,weightLabel(w),w,p.retail,a)};
+  }
+}
+async function cartPage(){
+  await loadCatalog();
+  if(!cart.length){A.innerHTML=`<h2>🛒 سلتك</h2><p class="mut">سلتك فارغة حالياً.</p><a href="#/">تصفح الأقسام</a>`;return}
+  const sub=cart.reduce((a,i)=>a+i.t,0),d=+settings.delivery;
+  A.innerHTML=`<h2>🛒 سلتك</h2><div class="card">${cart.map((i,k)=>`<div class="line"><span>${esc(i.n)} (${esc(i.d)}) ×${i.q>1&&i.d=='1 قطعة'?i.q:1}</span><span>${fm(i.t)} <button class="red" data-x="${k}">✕</button></span></div>`).join('')}
+  <div class="line"><span>المنتجات</span><span>${fm(sub)}</span></div><div class="line"><span>🚚 التوصيل</span><span>${fm(d)}</span></div><div class="line tot"><span>المجموع</span><span>${fm(sub+d)} د.ع</span></div></div>
+  <button class="gold" onclick="location.hash='#/checkout'">متابعة الطلب</button> <button class="ghost" id="clr">تفريغ السلة</button>`;
+  A.querySelectorAll('[data-x]').forEach(b=>b.onclick=()=>{cart.splice(+b.dataset.x,1);saveCart();cartPage()});
+  $('#clr').onclick=()=>{cart=[];saveCart();cartPage()};
+}
+async function checkout(){
+  await loadCatalog();
+  if(!cart.length)return location.hash='#/cart';
+  const sub=cart.reduce((a,i)=>a+i.t,0),d=+settings.delivery,c=ls.get('cust',{});
+  A.innerHTML=`<h2>بيانات التوصيل</h2><div class="card"><label>الاسم الكامل</label><input id="n" value="${esc(c.n)}"><label>رقم الهاتف (11 رقم)</label><input id="ph" type="tel" inputmode="numeric" value="${esc(c.ph)}"><label>العنوان بالتفصيل</label><input id="ad" value="${esc(c.ad)}"><label>أقرب نقطة دالة</label><input id="lm" value="${esc(c.lm)}"><p class="tot">المجموع: ${fm(sub+d)} د.ع (شامل التوصيل)</p><button class="gold" id="go">تأكيد الطلب</button></div>`;
+  $('#go').onclick=async()=>{
+    const n=$('#n').value.trim(),ph=$('#ph').value.trim(),ad=$('#ad').value.trim(),lm=$('#lm').value.trim();
+    if(!n||!ad||!lm)return toast('كمّل كل الحقول');
+    if(!/^\d{11}$/.test(ph))return toast('رقم الهاتف لازم 11 رقم');
+    $('#go').disabled=true;
+    try{
+      const r=await addDoc(collection(db,'orders'),{items:cart.map(({n,d,q,u,t})=>({n,d,q,u,t})),name:n,phone:ph,address:ad,landmark:lm,subtotal:sub,delivery:d,total:sub+d,status:'قيد التحضير',receipt:'',createdAt:serverTimestamp()});
+      ls.set('cust',{n,ph,ad,lm});ls.set('mine',[r.id,...ls.get('mine',[])].slice(0,30));
+      cart=[];saveCart();
+      A.innerHTML=`<div class="card"><h2>✅ تم استلام طلبك</h2><p>راح نتواصل وياك قريباً. تكدر تتابع حالته من "طلباتي".</p><a href="#/track">طلباتي</a></div>`;
+    }catch(e){toast('صار خطأ، حاول مرة ثانية');$('#go').disabled=false}
+  };
+}
+async function track(){
+  const ids=ls.get('mine',[]);
+  if(!ids.length){A.innerHTML=`<h2>📋 طلباتي</h2><p class="mut">ما عندك طلبات على هذا الجهاز.</p>`;return}
+  const docs=await Promise.all(ids.map(i=>getDoc(doc(db,'orders',i)).catch(()=>null)));
+  A.innerHTML=`<h2>📋 طلباتي</h2>`+docs.filter(d=>d&&d.exists()).map(d=>{const o=d.data();return `<div class="card" style="margin-bottom:10px"><b>طلب #${d.id.slice(0,6)}</b> <span class="badge">${esc(o.status)}</span>${o.receipt?`<div>📬 رقم الوصل: ${esc(o.receipt)}</div>`:''}${o.items.map(i=>`<div class="mut">• ${esc(i.n)} (${esc(i.d)}) = ${fm(i.t)}</div>`).join('')}<div class="tot">${fm(o.total)} د.ع</div></div>`}).join('');
+}
+
+// ---------- الأدمن ----------
+const NEXT={'قيد التحضير':'تم التجهيز','تم التجهيز':'تم الشحن','تم الشحن':'تم التسليم'};
+const PREV={'تم التجهيز':'قيد التحضير','تم الشحن':'تم التجهيز','تم التسليم':'تم الشحن','ملغي':'قيد التحضير'};
+function adminLogin(msg=''){
+  A.innerHTML=`<h2>دخول الأدمن</h2><div class="card"><label>الإيميل</label><input id="em" type="email"><label>كلمة السر</label><input id="pw" type="password"><div style="color:var(--red)">${msg}</div><button id="li">دخول</button></div>`;
+  $('#li').onclick=()=>signInWithEmailAndPassword(auth,$('#em').value.trim(),$('#pw').value).catch(()=>adminLogin('الإيميل أو كلمة السر غلط'));
+}
+function adminShell(tab){
+  A.innerHTML=`<div class="row"><button class="${tab=='o'?'gold':'ghost'}" data-t="o">📦 الطلبات</button><button class="${tab=='p'?'gold':'ghost'}" data-t="p">🛍 المواد</button><button class="${tab=='s'?'gold':'ghost'}" data-t="s">⚙️ الإعدادات</button><button class="red" id="so">خروج</button></div><div id="tb" style="margin-top:12px"></div>`;
+  A.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>adminTab(b.dataset.t));
+  $('#so').onclick=()=>signOut(auth);
+}
+function adminTab(t){
+  if(unsub){unsub();unsub=null}
+  adminShell(t);
+  ({o:adminOrders,p:adminProducts,s:adminSettings}[t])();
+}
+function adminOrders(){
+  let first=true;
+  unsub=onSnapshot(query(collection(db,'orders'),orderBy('createdAt','desc')),snap=>{
+    if(!first&&snap.docChanges().some(c=>c.type=='added'))beep();first=false;
+    const box=$('#tb');if(!box)return;
+    box.innerHTML=snap.docs.map(d=>{const o=d.data();return `<div class="card" style="margin-bottom:10px"><b>#${d.id.slice(0,6)}</b> <span class="badge">${esc(o.status)}</span>
+    <div>👤 ${esc(o.name)} · 📞 ${esc(o.phone)}</div><div>📍 ${esc(o.address)} - ${esc(o.landmark)}</div>
+    ${o.items.map(i=>`<div class="mut">• ${esc(i.n)} (${esc(i.d)}) = ${fm(i.t)}</div>`).join('')}
+    <div>🚚 ${fm(o.delivery)} · <b>${fm(o.total)} د.ع</b></div>${o.receipt?`<div>📬 ${esc(o.receipt)}</div>`:''}
+    <div class="row">${NEXT[o.status]?`<button data-a="n" data-i="${d.id}" data-s="${o.status}">✅ ${NEXT[o.status]}</button>`:''}${['قيد التحضير','تم التجهيز','تم الشحن'].includes(o.status)?`<button class="red" data-a="c" data-i="${d.id}">إلغاء</button>`:''}${PREV[o.status]?`<button class="ghost" data-a="u" data-i="${d.id}" data-s="${o.status}">↩️ تراجع</button>`:''}</div></div>`}).join('')||'<p class="mut">لا توجد طلبات.</p>';
+    box.querySelectorAll('[data-a]').forEach(b=>b.onclick=async()=>{
+      const r=doc(db,'orders',b.dataset.i),s=b.dataset.s;
+      if(b.dataset.a=='n'){const up={status:NEXT[s]};if(NEXT[s]=='تم الشحن'){const v=prompt('رقم الوصل:');if(v===null)return;up.receipt=v}await updateDoc(r,up)}
+      else if(b.dataset.a=='c'){if(confirm('إلغاء الطلب؟'))await updateDoc(r,{status:'ملغي'})}
+      else await updateDoc(r,{status:PREV[s]});
+    });
+  });
+}
+async function adminProducts(){
+  await loadCatalog(true);
+  const box=$('#tb');
+  box.innerHTML=`<div class="card"><b>الأقسام</b>${sections.map(s=>`<div class="line"><span>${esc(s.name)}</span><button class="red" data-ds="${s.id}">حذف</button></div>`).join('')}<button id="as">➕ إضافة قسم</button></div>
+  <div class="card" style="margin-top:12px"><b>➕ مادة جديدة</b><label>القسم</label><select id="ps">${sections.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
+  <label>الاسم</label><input id="pn"><label>الوصف</label><textarea id="pd"></textarea><label>الصورة</label><input id="pi" type="file" accept="image/*">
+  <label>طريقة التسعير</label><select id="pt"><option value="fixed">سعر ثابت</option><option value="weight">بالوزن (كيلو)</option><option value="sizes">أحجام متعددة</option></select><div id="pf"></div><button class="gold" id="sp">حفظ المادة</button></div>
+  <div class="card" style="margin-top:12px"><b>المواد الحالية</b>${products.map(p=>`<div class="line"><span>${esc(p.name)}</span><button class="red" data-dp="${p.id}">حذف</button></div>`).join('')}</div>`;
+  const fields=()=>{const t=$('#pt').value;$('#pf').innerHTML=t=='sizes'?`<label>كل حجم بسطر: الاسم,سعر العامة,سعر الجملة</label><textarea id="sz" placeholder="50 مل,5000,4000"></textarea>`:`<label>${t=='weight'?'سعر الكيلو':'السعر'} للعامة</label><input id="rt" type="number"><label>للمندوبين (الجملة)</label><input id="wh" type="number">${t=='weight'?'<label>أقل مبلغ للطلب (دينار)</label><input id="mn" type="number">':''}`};
+  $('#pt').onchange=fields;fields();
+  $('#as').onclick=async()=>{const n=prompt('اسم القسم:');if(n){await addDoc(collection(db,'sections'),{name:n});adminProducts()}};
+  box.querySelectorAll('[data-ds]').forEach(b=>b.onclick=async()=>{if(!confirm('يحذف القسم وكل مواده؟'))return;for(const p of products.filter(p=>p.sid==b.dataset.ds)){await deleteDoc(doc(db,'products',p.id));await deleteDoc(doc(db,'wholesale',p.id))}await deleteDoc(doc(db,'sections',b.dataset.ds));adminProducts()});
+  box.querySelectorAll('[data-dp]').forEach(b=>b.onclick=async()=>{if(confirm('حذف المادة؟')){await deleteDoc(doc(db,'products',b.dataset.dp));await deleteDoc(doc(db,'wholesale',b.dataset.dp));adminProducts()}});
+  $('#sp').onclick=async()=>{
+    const t=$('#pt').value,n=$('#pn').value.trim();if(!n||!$('#ps').value)return toast('اكمل الاسم والقسم');
+    const f=$('#pi').files[0],pr={sid:$('#ps').value,name:n,desc:$('#pd').value,type:t,img:f?await shrink(f):''},w={type:t};
+    if(t=='sizes'){const rows=$('#sz').value.split('\n').map(l=>l.split(',').map(x=>x.trim())).filter(r=>r.length>=3&&r[0]);if(!rows.length)return toast('اكتب الأحجام بالصيغة الصحيحة');pr.sizes=rows.map(r=>({l:r[0],r:+r[1]}));w.sizes=rows.map(r=>+r[2])}
+    else{pr.retail=+$('#rt').value;w.price=+$('#wh').value;if(!pr.retail)return toast('اكتب السعر');if(t=='weight')pr.min=+$('#mn').value||0}
+    const r=await addDoc(collection(db,'products'),pr);await setDoc(doc(db,'wholesale',r.id),w);toast('✅ تمت الإضافة');adminProducts();
+  };
+}
+async function adminSettings(){
+  await loadCatalog(true);
+  $('#tb').innerHTML=`<div class="card"><label>أجور التوصيل (دينار)</label><input id="df" type="number" value="${settings.delivery}"><label>رسالة الترحيب</label><textarea id="wl">${esc(settings.welcome)}</textarea><button class="gold" id="ss">حفظ</button></div>`;
+  $('#ss').onclick=async()=>{await setDoc(doc(db,'settings','main'),{delivery:+$('#df').value,welcome:$('#wl').value});toast('✅ تم الحفظ')};
+}
+let user=null;
+onAuthStateChanged(auth,u=>{user=u;if(location.hash=='#/admin')route()});
+
+// ---------- التوجيه ----------
+function route(){
+  if(unsub){unsub();unsub=null}
+  const [,r,id]=location.hash.split('/');saveCart();
+  const go={'':home,s:()=>section(id),p:()=>product(id),cart:cartPage,checkout,track,admin:()=>user?adminTab('o'):adminLogin()}[r||''];
+  (go||home)().catch(e=>{console.error(e);A.innerHTML='<p>صار خطأ بالتحميل. تأكد من الاتصال وحدّث الصفحة.</p>'});
+  scrollTo(0,0);
+}
+addEventListener('hashchange',route);route();
+</script>
+</body>
+</html>
