@@ -56,6 +56,7 @@ const db=getFirestore(app),auth=getAuth(app);
 const $=s=>document.querySelector(s),A=$('#app');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fm=n=>Number(n||0).toLocaleString('en-US');
+const num=s=>+String(s||'').replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^\d]/g,'');
 const ls={get:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}}};
 const toast=m=>{const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.append(t);setTimeout(()=>t.remove(),2200)};
 const weightLabel=kg=>{const g=Math.round(kg*1000),k=Math.floor(g/1000),r=g%1000;return k==0?`${r} غرام`:r==0?`${k} كغم`:`${k} كغم و${r} غرام`};
@@ -184,17 +185,19 @@ async function adminProducts(){
   <label>الاسم</label><input id="pn"><label>الوصف</label><textarea id="pd"></textarea><label>الصورة</label><input id="pi" type="file" accept="image/*">
   <label>طريقة التسعير</label><select id="pt"><option value="fixed">سعر ثابت</option><option value="weight">بالوزن (كيلو)</option><option value="sizes">أحجام متعددة</option></select><div id="pf"></div><button class="gold" id="sp">حفظ المادة</button></div>
   <div class="card" style="margin-top:12px"><b>المواد الحالية</b>${products.map(p=>`<div class="line"><span>${esc(p.name)}</span><button class="red" data-dp="${p.id}">حذف</button></div>`).join('')}</div>`;
-  const fields=()=>{const t=$('#pt').value;$('#pf').innerHTML=t=='sizes'?`<label>كل حجم بسطر: الاسم,سعر العامة,سعر الجملة</label><textarea id="sz" placeholder="50 مل,5000,4000"></textarea>`:`<label>${t=='weight'?'سعر الكيلو':'السعر'} للعامة</label><input id="rt" type="number"><label>للمندوبين (الجملة)</label><input id="wh" type="number">${t=='weight'?'<label>أقل مبلغ للطلب (دينار)</label><input id="mn" type="number">':''}`};
-  $('#pt').onchange=fields;fields();
+  const fields=()=>{const t=$('#pt').value;$('#pf').innerHTML=t=='sizes'?`<label>الأحجام</label><div id="szl"></div><button type="button" class="ghost" id="asz">➕ إضافة حجم</button>`:`<label>${t=='weight'?'سعر الكيلو':'السعر'} للعامة</label><input id="rt" inputmode="numeric"><label>للمندوبين (الجملة)</label><input id="wh" inputmode="numeric">${t=='weight'?'<label>أقل مبلغ للطلب (دينار)</label><input id="mn" inputmode="numeric">':''}`};
+  const addSz=()=>{const d=document.createElement('div');d.className='row sz';d.innerHTML='<input placeholder="الحجم (مثلاً 50 مل)"><input inputmode="numeric" placeholder="سعر العامة"><input inputmode="numeric" placeholder="سعر الجملة">';$('#szl').append(d)};
+  const draw=()=>{fields();if($('#asz')){$('#asz').onclick=addSz;addSz()}};
+  $('#pt').onchange=draw;draw();
   $('#as').onclick=async()=>{const n=prompt('اسم القسم:');if(n){await addDoc(collection(db,'sections'),{name:n});adminProducts()}};
   box.querySelectorAll('[data-ds]').forEach(b=>b.onclick=async()=>{if(!confirm('يحذف القسم وكل مواده؟'))return;for(const p of products.filter(p=>p.sid==b.dataset.ds)){await deleteDoc(doc(db,'products',p.id));await deleteDoc(doc(db,'wholesale',p.id))}await deleteDoc(doc(db,'sections',b.dataset.ds));adminProducts()});
   box.querySelectorAll('[data-dp]').forEach(b=>b.onclick=async()=>{if(confirm('حذف المادة؟')){await deleteDoc(doc(db,'products',b.dataset.dp));await deleteDoc(doc(db,'wholesale',b.dataset.dp));adminProducts()}});
   $('#sp').onclick=async()=>{
     const t=$('#pt').value,n=$('#pn').value.trim();if(!n||!$('#ps').value)return toast('اكمل الاسم والقسم');
     const f=$('#pi').files[0],pr={sid:$('#ps').value,name:n,desc:$('#pd').value,type:t,img:f?await shrink(f):''},w={type:t};
-    if(t=='sizes'){const rows=$('#sz').value.split('\n').map(l=>l.split(',').map(x=>x.trim())).filter(r=>r.length>=3&&r[0]);if(!rows.length)return toast('اكتب الأحجام بالصيغة الصحيحة');pr.sizes=rows.map(r=>({l:r[0],r:+r[1]}));w.sizes=rows.map(r=>+r[2])}
-    else{pr.retail=+$('#rt').value;w.price=+$('#wh').value;if(!pr.retail)return toast('اكتب السعر');if(t=='weight')pr.min=+$('#mn').value||0}
-    const r=await addDoc(collection(db,'products'),pr);await setDoc(doc(db,'wholesale',r.id),w);toast('✅ تمت الإضافة');adminProducts();
+    if(t=='sizes'){const rows=[...document.querySelectorAll('.sz')].map(d=>{const i=d.querySelectorAll('input');return [i[0].value.trim(),num(i[1].value),num(i[2].value)]}).filter(r=>r[0]&&r[1]>0);if(!rows.length)return toast('اكتب حجم وسعره على الأقل');pr.sizes=rows.map(r=>({l:r[0],r:r[1]}));w.sizes=rows.map(r=>r[2]||0)}
+    else{pr.retail=num($('#rt').value);w.price=num($('#wh').value);if(!pr.retail)return toast('اكتب السعر');if(t=='weight')pr.min=num($('#mn').value)||0}
+    try{const r=await addDoc(collection(db,'products'),pr);await setDoc(doc(db,'wholesale',r.id),w);toast('✅ تمت الإضافة');adminProducts()}catch(e){console.error(e);alert('ما انحفظت المادة: '+e.message)}
   };
 }
 async function adminSettings(){
