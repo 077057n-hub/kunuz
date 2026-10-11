@@ -51,6 +51,7 @@ const app=initializeApp({
   appId:"1:644995392724:web:3ffd83b1da2674bd530741"
 });
 const db=getFirestore(app),auth=getAuth(app);
+const NOTIFY_URL=''; // رابط Cloudflare Worker للإشعارات (يُملأ لاحقاً)
 
 // ---------- أدوات ----------
 const $=s=>document.querySelector(s),A=$('#app');
@@ -60,7 +61,8 @@ const num=s=>+String(s||'').replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf
 const ls={get:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}}};
 const toast=m=>{const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.append(t);setTimeout(()=>t.remove(),2200)};
 const weightLabel=kg=>{const g=Math.round(kg*1000),k=Math.floor(g/1000),r=g%1000;return k==0?`${r} غرام`:r==0?`${k} كغم`:`${k} كغم و${r} غرام`};
-const shrink=f=>new Promise(r=>{const i=new Image();i.onload=()=>{const s=Math.min(1,600/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=i.width*s;c.height=i.height*s;c.getContext('2d').drawImage(i,0,0,c.width,c.height);r(c.toDataURL('image/jpeg',.7))};i.src=URL.createObjectURL(f)});
+const shrink=f=>new Promise(r=>{const i=new Image();i.onload=()=>{const s=Math.min(1,480/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=i.width*s;c.height=i.height*s;c.getContext('2d').drawImage(i,0,0,c.width,c.height);r(c.toDataURL('image/jpeg',.6))};i.src=URL.createObjectURL(f)});
+const popup=(t,sub,fn)=>{const o=document.createElement('div');o.style.cssText='position:fixed;inset:0;background:#0008;z-index:20;display:flex;align-items:center;justify-content:center;padding:20px';o.innerHTML=`<div class="card" style="max-width:360px;width:100%;text-align:center"><h2>${t}</h2><p>${esc(sub)}</p><button class="gold">حسناً</button></div>`;o.querySelector('button').onclick=()=>{o.remove();fn&&fn()};document.body.append(o)};
 const beep=()=>{try{const x=new AudioContext(),o=x.createOscillator();o.connect(x.destination);o.frequency.value=880;o.start();o.stop(x.currentTime+.4)}catch{}};
 
 let sections=[],products=[],settings={welcome:'أهلاً بيك 🌿 اختار القسم اللي تريده:',delivery:5000},cart=ls.get('cart',[]),unsub=null;
@@ -126,13 +128,14 @@ async function checkout(){
     const n=$('#n').value.trim(),ph=$('#ph').value.trim(),ad=$('#ad').value.trim(),lm=$('#lm').value.trim();
     if(!n||!ad||!lm)return toast('كمّل كل الحقول');
     if(!/^\d{11}$/.test(ph))return toast('رقم الهاتف لازم 11 رقم');
-    $('#go').disabled=true;
+    $('#go').disabled=true;$('#go').textContent='جاري الإرسال...';
     try{
       const r=await addDoc(collection(db,'orders'),{items:cart.map(({n,d,q,u,t})=>({n,d,q,u,t})),name:n,phone:ph,address:ad,landmark:lm,subtotal:sub,delivery:d,total:sub+d,status:'قيد التحضير',receipt:'',createdAt:serverTimestamp()});
+      if(NOTIFY_URL)fetch(NOTIFY_URL,{method:'POST',body:JSON.stringify({id:r.id})}).catch(()=>{});
       ls.set('cust',{n,ph,ad,lm});ls.set('mine',[r.id,...ls.get('mine',[])].slice(0,30));
       cart=[];saveCart();
       A.innerHTML=`<div class="card"><h2>✅ تم استلام طلبك</h2><p>راح نتواصل وياك قريباً. تكدر تتابع حالته من "طلباتي".</p><a href="#/track">طلباتي</a></div>`;
-    }catch(e){toast('صار خطأ، حاول مرة ثانية');$('#go').disabled=false}
+    }catch(e){toast('صار خطأ، حاول مرة ثانية');$('#go').disabled=false;$('#go').textContent='تأكيد الطلب'}
   };
 }
 async function track(){
@@ -177,8 +180,8 @@ function adminOrders(){
     });
   });
 }
-async function adminProducts(){
-  await loadCatalog(true);
+async function adminProducts(fresh=true){
+  if(fresh)await loadCatalog(true);
   const box=$('#tb');
   box.innerHTML=`<div class="card"><b>الأقسام</b>${sections.map(s=>`<div class="line"><span>${esc(s.name)}</span><button class="red" data-ds="${s.id}">حذف</button></div>`).join('')}<button id="as">➕ إضافة قسم</button></div>
   <div class="card" style="margin-top:12px"><b>➕ مادة جديدة</b><label>القسم</label><select id="ps">${sections.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
@@ -189,15 +192,16 @@ async function adminProducts(){
   const addSz=()=>{const d=document.createElement('div');d.className='row sz';d.innerHTML='<input placeholder="الحجم (مثلاً 50 مل)"><input inputmode="numeric" placeholder="سعر العامة"><input inputmode="numeric" placeholder="سعر الجملة">';$('#szl').append(d)};
   const draw=()=>{fields();if($('#asz')){$('#asz').onclick=addSz;addSz()}};
   $('#pt').onchange=draw;draw();
-  $('#as').onclick=async()=>{const n=prompt('اسم القسم:');if(n){await addDoc(collection(db,'sections'),{name:n});adminProducts()}};
+  $('#as').onclick=async()=>{const n=prompt('اسم القسم:');if(n){const r=await addDoc(collection(db,'sections'),{name:n});sections.push({id:r.id,name:n});popup('✅ تمت إضافة القسم',n,()=>adminProducts(false))}};
   box.querySelectorAll('[data-ds]').forEach(b=>b.onclick=async()=>{if(!confirm('يحذف القسم وكل مواده؟'))return;for(const p of products.filter(p=>p.sid==b.dataset.ds)){await deleteDoc(doc(db,'products',p.id));await deleteDoc(doc(db,'wholesale',p.id))}await deleteDoc(doc(db,'sections',b.dataset.ds));adminProducts()});
-  box.querySelectorAll('[data-dp]').forEach(b=>b.onclick=async()=>{if(confirm('حذف المادة؟')){await deleteDoc(doc(db,'products',b.dataset.dp));await deleteDoc(doc(db,'wholesale',b.dataset.dp));adminProducts()}});
+  box.querySelectorAll('[data-dp]').forEach(b=>b.onclick=async()=>{if(confirm('حذف المادة؟')){const id=b.dataset.dp;await Promise.all([deleteDoc(doc(db,'products',id)),deleteDoc(doc(db,'wholesale',id))]);products=products.filter(p=>p.id!=id);adminProducts(false)}});
   $('#sp').onclick=async()=>{
     const t=$('#pt').value,n=$('#pn').value.trim();if(!n||!$('#ps').value)return toast('اكمل الاسم والقسم');
     const f=$('#pi').files[0],pr={sid:$('#ps').value,name:n,desc:$('#pd').value,type:t,img:f?await shrink(f):''},w={type:t};
     if(t=='sizes'){const rows=[...document.querySelectorAll('.sz')].map(d=>{const i=d.querySelectorAll('input');return [i[0].value.trim(),num(i[1].value),num(i[2].value)]}).filter(r=>r[0]&&r[1]>0);if(!rows.length)return toast('اكتب حجم وسعره على الأقل');pr.sizes=rows.map(r=>({l:r[0],r:r[1]}));w.sizes=rows.map(r=>r[2]||0)}
     else{pr.retail=num($('#rt').value);w.price=num($('#wh').value);if(!pr.retail)return toast('اكتب السعر');if(t=='weight')pr.min=num($('#mn').value)||0}
-    try{const r=await addDoc(collection(db,'products'),pr);await setDoc(doc(db,'wholesale',r.id),w);toast('✅ تمت الإضافة');adminProducts()}catch(e){console.error(e);alert('ما انحفظت المادة: '+e.message)}
+    const sp=$('#sp');sp.disabled=true;sp.textContent='جاري الحفظ...';
+    try{const ref=doc(collection(db,'products'));await Promise.all([setDoc(ref,pr),setDoc(doc(db,'wholesale',ref.id),w)]);products.push({id:ref.id,...pr});popup('✅ تمت إضافة المادة',n,()=>adminProducts(false))}catch(e){console.error(e);alert('ما انحفظت المادة: '+e.message);sp.disabled=false;sp.textContent='حفظ المادة'}
   };
 }
 async function adminSettings(){
